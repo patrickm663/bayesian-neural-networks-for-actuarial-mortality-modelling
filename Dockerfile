@@ -3,12 +3,11 @@ RUN apt-get update && \
     apt-get install -y ca-certificates && \
     update-ca-certificates && \
     rm -rf /var/lib/apt/lists/*
-# DEBUG ONLY: Tell Julia to trust everyone (Dangerous)
 ENV JULIA_SSL_NO_VERIFY_HOSTS="**"
 
 WORKDIR /app
 
-COPY mcmc/Project.toml Project.toml
+COPY Project.toml Project.toml
 COPY data/ ./data/
 RUN julia --project=. -e 'using Pkg; Pkg.add(url="https://github.com/patrickm663/hmd.jl")'
 RUN julia --project=. -e 'using Pkg; Pkg.instantiate();'

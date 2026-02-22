@@ -17,7 +17,7 @@ end
 
 # ╔═╡ ef51c95e-d5ad-455a-9631-094823b695bb
 # ╠═╡ show_logs = false
-using ADTypes, Lux, Optimisers, Printf, Random, CSV, Plots, DataFrames, ComponentArrays, HMD, Zygote, Statistics, Distributions, Functors, Turing, Tracker, LinearAlgebra, StatsPlots, AbstractGPs, KernelFunctions
+using ADTypes, Lux, Optimisers, Printf, Random, CSV, Plots, DataFrames, ComponentArrays, HMD, Zygote, Statistics, Distributions, Functors, Turing, Tracker, LinearAlgebra, StatsPlots, AbstractGPs, KernelFunctions, Plots.Measures
 
 # ╔═╡ f6696102-2894-4d54-be66-32004ea6486d
 Turing.setprogress!(true);
@@ -46,7 +46,7 @@ begin
 ]#HMD.get_countries()
 	country = list_of_countries[1]
 	gender_ = :Female
-	p_ = 0.10#0.25#0.05#0.01
+	p_ = 0.05#0.05#0.25#0.05#0.01
 	model_type = "NN"
 	# Hard-code
 	if model_type == "NN"
@@ -360,6 +360,7 @@ function classicNN(hidden_dims; act=tanh)
 	
 	_NN =  Chain(
 				Dense(2 => hidden_dims, act), 
+				Dense(hidden_dims => hidden_dims, act),
 				Dense(hidden_dims => hidden_dims, act),
 				Dense(hidden_dims => hidden_dims, act),
 				Dense(hidden_dims => 2, identity)
@@ -951,7 +952,7 @@ end
 
 # ╔═╡ 055dd1ae-39f1-4292-8a6e-00cfd2795688
 begin
-	X_train, y_train, X_valid, y_valid, TEST, country_embeddings = get_data_NEW(list_of_countries[[20, 22, 23, 32, 35, 38]]; filtered=-1, p_=p_)
+	X_train, y_train, X_valid, y_valid, TEST, country_embeddings = get_data_NEW(list_of_countries[[20, 22, 23, 32, 35, 38]]; filtered=-1, p_=p_, genders=[:Female])
 	#X_train, y_train, X_valid, y_valid, TEST, country_embeddings = get_data_NEW([country])
 	country_embed_dims = length(country_embeddings)
 end
@@ -1032,7 +1033,7 @@ function LeeCarterNN_gender(hidden_dims; show_intermediate=false, act=tanh, N_co
 			log_σ² = (model₃(age_year)[1, :] .* region_params[4, :]) |> vec
 			
 			if show_intermediate
-				@return (age_params, year_params, region_params)
+				@return (age_params, year_params, region_params, log_σ²)
 			else
 				@return hcat(α .+ β .* κ, log_σ²)
 			end
@@ -1232,7 +1233,7 @@ function HeligmanPollardNN_gender(hidden_dims; show_intermediate=false, act=tanh
 			log_σ² = (model₄(age_year)[1, :] .* region_params[9, :]) |> vec
 			
 			if show_intermediate
-				@return year_params
+				@return (infant_year_params, hump_year_params, secant_year_params, region_params)
 			else
 				@return hcat(log.(HP_mx), log_σ²)
 			end
@@ -1360,7 +1361,7 @@ end
 country_embeddings
 
 # ╔═╡ ad84dffe-d03b-4e5d-8856-347f4e0e4332
-list_of_countries[[20, 22, 32, 35, 38]]
+list_of_countries[[20, 22, 23, 32, 35, 38]]
 
 # ╔═╡ 40711e69-c166-4a2a-8d37-88f0c241fcce
 list_of_countries
@@ -1379,65 +1380,6 @@ X_train
 
 # ╔═╡ 8e5c8f3f-cfee-4dbc-baf5-f392b26e0e54
 TEST
-
-# ╔═╡ 03acd606-0d03-457c-933c-2f1ff0caded6
-begin
-# 1. SETUP: Mappings
-
-# Invert to get ID -> Name
-id_to_name = Dict(value => key for (key, value) in country_embeddings)
-
-# 2. FILTER DATA
-# Filter for Odd IDs (Females)
-df_odd = filter(row -> isodd(row.PopID), TEST)
-df_odd = filter(row -> row.Year .≤ end_year, df_odd)
-unique_ids = sort(unique(df_odd.PopID))
-
-# Define global color limits so all plots share the same scale
-z_min, z_max = extrema(df_odd.log_mx)
-
-# 3. PLOTTING LOOP
-plot_list = []
-
-for pid in unique_ids
-    # Get data for this country
-    sub_df = filter(row -> row.PopID == pid, df_odd)
-    
-    # SORTING IS CRITICAL for reshaping
-    # We sort by Age then Year to ensure the matrix fills correctly
-    sort!(sub_df, [:Year, :Age])
-    
-    # Extract axes
-    x_ages = sort(unique(sub_df.Age))
-    y_years = sort(unique(sub_df.Year))
-    
-    # Reshape z-vector into a Matrix (Years x Ages) for Plots.jl
-    # Dimensions must be [length(y_years), length(x_ages)]
-    z_matrix = reshape(sub_df.log_mx, length(x_ages), length(y_years))'
-    
-    # Create the single plot
-    p = heatmap(
-        x_ages, 
-        y_years, 
-        z_matrix, 
-        title = id_to_name[pid],
-        xlabel = "Age",
-        ylabel = "Year",
-        c = :magma,       # Colormap
-        clims = (z_min, z_max), # Shared color scale
-        colorbar = true   # Keep colorbar on individual plots for readability
-    )
-    
-    push!(plot_list, p)
-end
-
-# 4. COMBINE PLOTS
-# We use a 3x2 layout. Since there are 5 plots, the 6th slot will be empty.
-final_plot = plot(plot_list..., layout = (3, 2), size = (1000, 1200), plot_title="Log Mortality Rates (Females)")
-
-# Display
-final_plot
-end
 
 # ╔═╡ 1b83a76d-2587-4e3c-a000-901a5a165716
 add_var_to_y(yt) = vcat(yt, repeat([log.(var(yt))], size(yt, 2))')
@@ -1630,7 +1572,7 @@ end
 
 # ╔═╡ 0711bfc1-4337-4ae4-a5b0-c7b08dae2190
 begin
-	N_samples = 200#5_000#1_500#1_000
+	N_samples = 250#50
 	half_N_samples = max(10, Int(N_samples/2))
 	N_chains = 4#2#4#1
 end
@@ -1745,7 +1687,7 @@ function BNN(BNN_arch, N_samples)
 end
 
 # ╔═╡ 60fe0f3c-89e0-4996-8af6-7424b772cefa
-#chains, ps_BNN, st_BNN, chains_prior = BNN(BNN_arch, N_samples)
+chains, ps_BNN, st_BNN, chains_prior = BNN(BNN_arch, N_samples)
 
 # ╔═╡ 0042643c-bf69-4a8d-b727-c0c875c77973
 summarize(chains)
@@ -1809,13 +1751,14 @@ function predict(m, xs, chains, p_, st_, N_sims)
 		res = (Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1])
 		res_μ = res[:, 1]
 		res_σ² = exp.(res[:, 2])
-		return vec(rand(Xoshiro(1111+q), MvNormal(res_μ, I * res_σ²)))
+		return vec(rand(Xoshiro(1111+q), MvNormal(res_μ, I * res_σ²))), res_σ²
 	end
 
 	#y_pred_f = hcat([fwd_pass(θ_sample[k, :] .* α_sample[k, :], k) for k ∈ 1:N_sims]...)'
-	y_pred_f = hcat([fwd_pass(θ_sample[k, :], k) for k ∈ 1:N_sims]...)'
+	y_pred_f = hcat([fwd_pass(θ_sample[k, :], k)[1] for k ∈ 1:N_sims]...)'
+	y_pred_f_var = hcat([fwd_pass(θ_sample[k, :], k)[2] for k ∈ 1:N_sims]...)'
 
-	return quantile.(eachcol(y_pred_f), 0.5) |> vec, quantile.(eachcol(y_pred_f), 0.025) |> vec, quantile.(eachcol(y_pred_f), 1-0.025) |> vec
+	return quantile.(eachcol(y_pred_f), 0.5) |> vec, quantile.(eachcol(y_pred_f), 0.025) |> vec, quantile.(eachcol(y_pred_f), 1-0.025) |> vec, quantile.(eachcol(y_pred_f_var), 0.5) |> vec
 end
 
 # ╔═╡ c1ca74d8-8c90-427b-8bf2-41ab1d13bcf3
@@ -1873,24 +1816,6 @@ end
 # ╔═╡ 3c47c725-8751-4088-bc99-39c3cc653377
 predict(tstate, X_train)
 
-# ╔═╡ c0047459-5f14-4af7-b541-8238763d4a70
-y_pred_valid = predict(tstate, Matrix(TEST[end_year .< TEST.Year .≤ forecast_year  .&& TEST[:, :log_mx] .< 0, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])')[:, 1]
-
-# ╔═╡ 7e8e62f5-28a1-4153-892a-fc8988130f4b
-@info "MSE Testing x10e-4: $(mean((exp.(Matrix(TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0, ["log_mx"]]) |> vec) .- exp.(y_pred_valid)) .^ 2) * 1e4)"
-
-# ╔═╡ e1e33d8e-0fd1-42d9-84ff-3b5ca4161c11
-@info "Log RMSE Testing: $(mean(((Matrix(TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0, ["log_mx"]]) |> vec) .- (y_pred_valid)) .^ 2) |> sqrt)"
-
-# ╔═╡ f1f84de0-488a-4bad-a2a4-64965d493dc7
-y_pred_train = predict(tstate, Matrix(TEST[end_year .≥ TEST.Year .&& TEST[:, :log_mx] .< 0, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])')[:, 1]
-
-# ╔═╡ c8bca677-24d5-4bcc-b881-e0f43f208ca9
-@info "MSE Training x10e-4: $(mean((exp.(Matrix(TEST[end_year .≥ TEST.Year .&& TEST[:, :log_mx] .< 0, ["log_mx"]]) |> vec) .- exp.(y_pred_train)) .^ 2) * 1e4)"
-
-# ╔═╡ 36452b3e-4f2a-4f20-aec2-228b8d685c82
-@info "Log RMSE Training: $(mean(((Matrix(TEST[end_year .≥ TEST.Year .&& TEST[:, :log_mx] .< 0, ["log_mx"]]) |> vec) .- (y_pred_train)) .^ 2) |> sqrt)"
-
 # ╔═╡ f099a171-e1ba-4d74-87a3-010e0e9ff27a
 if model_type ≠ "NN"
 	forecast = predict(tstate, X_valid, (extended_forecast_year-end_year+1), x_1, x_2, standardise)
@@ -1908,16 +1833,21 @@ predict(BNN_arch, X_train, θ_MAP, ps_MAP, st_BNN)[:, 2]
 # ╔═╡ 0b8f579c-36e9-4660-9793-c537bb5e275d
 TEST
 
+# ╔═╡ b95c378a-13a1-4393-9d6e-808827c76159
+extended_forecast_year
+
 # ╔═╡ 7c48fa09-5061-43e6-8483-961b3d2cee0c
 begin
 	actual_set_train = TEST[TEST.Year .≤ end_year .&& TEST[:, :log_mx] .< 0, ["log_mx"]]
 	train_set = Matrix(TEST[TEST.Year .≤ end_year .&& TEST[:, :log_mx] .< 0, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
 	actual_set_test = TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0, ["log_mx"]]
 	test_set = Matrix(TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
+	test_set_ext = Matrix(TEST[end_year .< TEST.Year .≤ extended_forecast_year, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
 	
-	pred_set_train, lb_train, ub_train = predict(BNN_arch, train_set, chains, ps_BNN, st_BNN, 10_000)
+	pred_set_train, lb_train, ub_train, var_train = predict(BNN_arch, train_set, chains, ps_BNN, st_BNN, 10_000)
 	pred_set_train_MAP = predict(BNN_arch, train_set, θ_MAP, ps_MAP, st_BNN)[:, 1]
-	pred_set_test, lb_test, ub_test = predict(BNN_arch, test_set, chains, ps_BNN, st_BNN, 10_000)
+	pred_set_test, lb_test, ub_test, _ = predict(BNN_arch, test_set, chains, ps_BNN, st_BNN, 10_000)
+	_, _, _, var_test = predict(BNN_arch, test_set_ext, chains, ps_BNN, st_BNN, 10_000)
 	pred_set_test_MAP = predict(BNN_arch, test_set, θ_MAP, ps_MAP, st_BNN)[:, 1]
 
 	mse_exp(actual, pred) = mean(((exp.(actual) .- exp.(pred)) .^ 2).log_mx)
@@ -1965,10 +1895,47 @@ begin
 	@info "Log MAE Testing Set (MAP): $(mae_log(actual_set_test, pred_set_test_MAP))"
 end
 
+# ╔═╡ c9824a8f-9fbf-4285-9ca7-48eb173f6e85
+var_train
+
+# ╔═╡ e1f8ec5d-e3a1-4c5e-bf8b-6089388ae7a4
+reshape(var_test, :, 100)
+
+# ╔═╡ b4aa212a-d59d-43da-ac8c-700022c12b16
+plt_log_var = heatmap(
+	#1950:1999,
+	2000:2065,
+	0:99,
+	reshape(log.(var_test), :, 100)', 
+	xlab="Year", 
+	ylab="Age",
+	title="log σ²"
+)
+
+# ╔═╡ 6b98d2bc-de7d-463f-9728-29fa03539c26
+pop_id = 6
+
+# ╔═╡ c0047459-5f14-4af7-b541-8238763d4a70
+y_pred_valid = predict(tstate, Matrix(TEST[end_year .< TEST.Year .≤ forecast_year  .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])')[:, 1]
+
+# ╔═╡ f1f84de0-488a-4bad-a2a4-64965d493dc7
+y_pred_train = predict(tstate, Matrix(TEST[end_year .≥ TEST.Year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])')[:, 1]
+
+# ╔═╡ c8bca677-24d5-4bcc-b881-e0f43f208ca9
+@info "MSE Training x10e-4: $(mean((exp.(Matrix(TEST[end_year .≥ TEST.Year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["log_mx"]]) |> vec) .- exp.(y_pred_train)) .^ 2) * 1e4)"
+
+# ╔═╡ 36452b3e-4f2a-4f20-aec2-228b8d685c82
+@info "Log RMSE Training: $(mean(((Matrix(TEST[end_year .≥ TEST.Year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["log_mx"]]) |> vec) .- (y_pred_train)) .^ 2) |> sqrt)"
+
+# ╔═╡ 7e8e62f5-28a1-4153-892a-fc8988130f4b
+@info "MSE Testing x10e-4: $(mean((exp.(Matrix(TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["log_mx"]]) |> vec) .- exp.(y_pred_valid)) .^ 2) * 1e4)"
+
+# ╔═╡ e1e33d8e-0fd1-42d9-84ff-3b5ca4161c11
+@info "Log RMSE Testing: $(mean(((Matrix(TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["log_mx"]]) |> vec) .- (y_pred_valid)) .^ 2) |> sqrt)"
+
 # ╔═╡ c59ed9df-f944-4ee6-881e-2986dc8b1d3d
 begin
 	if model_type == "NN"
-		pop_id = 1
 		country_name = [k for (k,v) in country_embeddings if v == pop_id][1]
 		# Get first year of validation/test set
 		X_test_valid = Matrix(TEST[TEST.Year .== end_year .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
@@ -1979,7 +1946,7 @@ begin
 
 		plot(title="Validation Set ($end_year): $(country_name)\n Lee-Carter NN", xlab="Age", ylab="log μ", legend=:topleft)#, ylim=(-12.0, 0.0))
 		
-		median_pred, lb_pred, ub_pred = predict(BNN_arch, X_test_valid, chains, ps_BNN, st_BNN, 10_000)
+		median_pred, lb_pred, ub_pred, _ = predict(BNN_arch, X_test_valid, chains, ps_BNN, st_BNN, 10_000)
 
 		MAP_pred = predict(BNN_arch, X_test_valid, θ_MAP, ps_MAP, st_BNN)[:, 1]
 
@@ -2016,6 +1983,97 @@ begin
 	end
 end
 
+# ╔═╡ d826f3b4-8a5f-4f99-88fb-d9b8420c6d89
+begin
+	
+	mdl_type = "LCNN"
+	plt_y_set = []
+	year_set = 1950:10:2000#2010:10:2050
+
+	for yrs in year_set
+
+		X_test_forecast = Matrix(TEST[TEST.Year .== yrs .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
+		y_pred_forecast = predict(tstate, X_test_forecast)[:, 1]
+		y_actuals_forecast = TEST[TEST.Year .== yrs .&& TEST.PopID .== pop_id, ["Age", "log_mx"]]
+		y_actuals_obs_forecast = TEST[TEST.Year .== yrs .&& TEST.PopID .== pop_id .&& TEST.Observed .== 1 .&& TEST.log_mx .< 0.0, ["Age", "log_mx"]]
+
+		MAP_forecast = predict(BNN_arch, X_test_forecast, θ_MAP, ps_MAP, st_BNN)[:, 1]
+		median_forecast, lb_forecast, ub_forecast, _ = predict(BNN_arch, X_test_forecast, chains, ps_BNN, st_BNN, 10_000)
+		
+		plt_y = begin
+			plot(title="Year $yrs: $(country_name)\n $(mdl_type)", xlab="Age", ylab="log μ", legend=:best, ylim=(-12.0, -0.001), left_margin=5mm)
+			plot!(start_age:end_age, vec(y_pred_forecast), label="Predicted: AdamW", width=2, color=:blue)
+			plot!(start_age:end_age, vec(median_forecast), label="Predicted: BNN Median", width=2, color=:red)
+			plot!(start_age:end_age, vec(MAP_forecast), label="Predicted: BNN MAP", width=2, color=:red, linestyle=:dash)
+			plot!(start_age:end_age, vec(lb_forecast), fillrange=vec(ub_forecast), label="Predicted: BNN 95% CI", color=:red, width=0.9, alpha=0.2)
+			#scatter!(y_actuals_forecast.Age, y_actuals_forecast.log_mx, label="Actual: Complete", color=:orange)
+			scatter!(y_actuals_obs_forecast.Age, y_actuals_obs_forecast.log_mx, label="Actual: Observed", color=:black)
+		end
+		push!(plt_y_set, plt_y)
+	end
+
+	plot(plt_y_set..., layout = (3, 2), size = (1000, 1200), plot_title="")
+
+end
+
+# ╔═╡ 03acd606-0d03-457c-933c-2f1ff0caded6
+begin
+# 1. SETUP: Mappings
+
+# Invert to get ID -> Name
+id_to_name = Dict(value => key for (key, value) in country_embeddings)
+
+# 2. FILTER DATA
+# Filter for Odd IDs (Females)
+df_odd = filter(row -> isodd(row.PopID), TEST)
+df_odd = filter(row -> row.Year .≤ end_year, df_odd)
+unique_ids = sort(unique(df_odd.PopID))
+
+# Define global color limits so all plots share the same scale
+z_min, z_max = extrema(df_odd.log_mx)
+
+# 3. PLOTTING LOOP
+plot_list = []
+
+for pid in unique_ids
+    # Get data for this country
+    sub_df = filter(row -> row.PopID == pid, df_odd)
+    
+    # SORTING IS CRITICAL for reshaping
+    # We sort by Age then Year to ensure the matrix fills correctly
+    sort!(sub_df, [:Year, :Age])
+    
+    # Extract axes
+    x_ages = sort(unique(sub_df.Age))
+    y_years = sort(unique(sub_df.Year))
+    
+    # Reshape z-vector into a Matrix (Years x Ages) for Plots.jl
+    # Dimensions must be [length(y_years), length(x_ages)]
+    z_matrix = reshape(sub_df.log_mx, length(x_ages), length(y_years))'
+    
+    # Create the single plot
+    p = heatmap(
+        x_ages, 
+        y_years, 
+        z_matrix, 
+        title = id_to_name[pid],
+        xlabel = "Age",
+        ylabel = "Year",
+        c = :magma,       # Colormap
+        clims = (z_min, z_max), # Shared color scale
+        colorbar = true   # Keep colorbar on individual plots for readability
+    )
+    
+    push!(plot_list, p)
+end
+
+# 4. COMBINE PLOTS
+final_plot = plot(plot_list..., layout = (3, 2), size = (1000, 1200), plot_title="Log Mortality Rates (Females)", left_margin=5mm)
+
+# Display
+final_plot
+end
+
 # ╔═╡ 57f6b96c-98e4-4a68-942c-13d1036ce643
 begin
 	actual_set_train_ci = TEST[TEST.Year .≤ end_year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["log_mx"]]
@@ -2023,9 +2081,9 @@ begin
 	actual_set_test_ci = TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["log_mx"]]
 	test_set_ci = Matrix(TEST[end_year .< TEST.Year .≤ forecast_year .&& TEST[:, :log_mx] .< 0 .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
 	
-	pred_set_train_ci, lb_train_ci, ub_train_ci = predict(BNN_arch, train_set_ci, chains, ps_BNN, st_BNN, 10_000)
+	pred_set_train_ci, lb_train_ci, ub_train_ci, _ = predict(BNN_arch, train_set_ci, chains, ps_BNN, st_BNN, 10_000)
 	pred_set_train_MAP_ci = predict(BNN_arch, train_set_ci, θ_MAP, ps_MAP, st_BNN)[:, 1]
-	pred_set_test_ci, lb_test_ci, ub_test_ci = predict(BNN_arch, test_set_ci, chains, ps_BNN, st_BNN, 10_000)
+	pred_set_test_ci, lb_test_ci, ub_test_ci, _ = predict(BNN_arch, test_set_ci, chains, ps_BNN, st_BNN, 10_000)
 	pred_set_test_MAP_ci = predict(BNN_arch, test_set_ci, θ_MAP, ps_MAP, st_BNN)[:, 1]
 
 
@@ -2061,73 +2119,34 @@ begin
 	@info "Log MAE Testing Set (MAP): $(mae_log(actual_set_test_ci, pred_set_test_MAP_ci))"
 end
 
-# ╔═╡ d826f3b4-8a5f-4f99-88fb-d9b8420c6d89
-begin
-	forecast_year_ = 1980
-	if model_type ≠ "NN"
-		plot(title="Year $forecast_year_: $(country)\n τ₀=$τ₀, τ₁=$τ₁, T=$T, cell=$cell, depth=$NN_depth, gender=$gender_", xlab="Year", ylab="log μ", legend=:topleft)
-
-		median_forecast, lb_forecast, ub_forecast = predict(BNN_arch, X_valid, chains, ps_BNN, st_BNN, (extended_forecast_year-end_year+1), x_1, x_2, standardise, 1_000)
-		
-		plot!(start_age:end_age, vec(forecast[forecast_year_-end_year+1, :]'), label="Forecast: $opt", color=:blue, width=2)
-		plot!(start_age:end_age, vec(median_forecast[forecast_year_-end_year+1, :]'), label="Forecast: BNN Median", color=:red, width=2)
-		plot!(start_age:end_age, vec(lb_forecast[forecast_year_-end_year+1, :]'), fillrange=vec(ub_forecast[forecast_year_-end_year+1, :]'), label="Forecast: BNN 95% CI", color=:red, width=0.9, alpha=0.2)
-		scatter!(y_test[y_test.Year .== forecast_year_, :Age], y_test[y_test.Year .== forecast_year_, gender_], label="Actual", color=:orange)
-	else
-		X_test_forecast = Matrix(TEST[TEST.Year .== forecast_year_ .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
-		y_pred_forecast = predict(tstate, X_test_forecast)[:, 1]
-		y_actuals_forecast = TEST[TEST.Year .== forecast_year_ .&& TEST.PopID .== pop_id, ["Age", "log_mx"]]
-		y_actuals_obs_forecast = TEST[TEST.Year .== forecast_year_ .&& TEST.PopID .== pop_id .&& TEST.Observed .== 1 .&& TEST.log_mx .< 0.0, ["Age", "log_mx"]]
-
-		MAP_forecast = predict(BNN_arch, X_test_forecast, θ_MAP, ps_MAP, st_BNN)[:, 1]
-		
-		plot(title="Forecast (Year $forecast_year_): $(country)\n τ₁=$τ₁, act=$act, FNN, depth=$NN_depth", xlab="Age", ylab="log μ", legend=:best, ylim=(-12.0, 0.0))
-		plot(title="Year $forecast_year_: $(country_name)\n Lee-Carter NN", xlab="Age", ylab="log μ", legend=:best, ylim=(-12.0, -0.001))
-		
-		median_forecast, lb_forecast, ub_forecast = predict(BNN_arch, X_test_forecast, chains, ps_BNN, st_BNN, 10_000)
-
-		plot!(start_age:end_age, vec(y_pred_forecast), label="Predicted: AdamW", width=2, color=:blue)
-		plot!(start_age:end_age, vec(median_forecast), label="Predicted: BNN Median", width=2, color=:red)
-		plot!(start_age:end_age, vec(MAP_forecast), label="Predicted: BNN MAP", width=2, color=:red, linestyle=:dash)
-		plot!(start_age:end_age, vec(lb_forecast), fillrange=vec(ub_forecast), label="Predicted: BNN 95% CI", color=:red, width=0.9, alpha=0.2)
-		scatter!(y_actuals_forecast.Age, y_actuals_forecast.log_mx, label="Actual: Complete", color=:orange)
-		scatter!(y_actuals_obs_forecast.Age, y_actuals_obs_forecast.log_mx, label="Actual: Observed", color=:black)
-	end
-end
-
 # ╔═╡ c1b667d2-1411-4637-9309-967309cc30e6
 begin
-	forecast_age = 65
-	if model_type ≠ "NN"
-		adj_forecast_age = forecast_age + Int((3 - τ₀)/2)
-		@assert forecast_age ≥ (τ₀ + 1)/2 - 1
-		
-		plot(title="Forecast (Age $forecast_age): $(country)\n τ₀=$τ₀, τ₁=$τ₁, T=$T, cell=$cell, depth=$NN_depth", xlab="Year", ylab="log μ", legend=:best)
-	
-		median_forecast2, lb_forecast2, ub_forecast2 = predict(BNN_arch, X_valid, chains, ps_BNN, st_BNN, (extended_forecast_year-end_year+1), x_1, x_2, standardise, 1_000)
-	
-		plot!(end_year:extended_forecast_year, forecast[:, adj_forecast_age], label="Forecast: $opt", color=:blue, width=2)
-		plot!(end_year:extended_forecast_year, median_forecast2[:, adj_forecast_age], label="Forecast: BNN Median", color=:red, width=2)
-		plot!(end_year:extended_forecast_year, lb_forecast2[:, adj_forecast_age], fillrange=ub_forecast2[:, adj_forecast_age], label="Forecast: BNN 95% CI", color=:red, width=0.9, alpha=0.2)
-		scatter!(y_test[y_test.Age .== forecast_age, :Year], y_test[y_test.Age .== forecast_age, :Female], label="Actual", color=:orange)
-	else
-		X_test_forecast_ = Matrix(TEST[TEST.Age .== forecast_age .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
+	plt_a_set = []
+	age_set = 20:15:95
+	year_r = (1950, 2030)#(2000, 2050)
+
+	for ages in age_set
+
+		X_test_forecast_ = Matrix(TEST[TEST.Age .== ages .&& TEST.PopID .== pop_id, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
 		y_pred_forecast_ = predict(tstate, X_test_forecast_)[:, 1]
 		MAP_forecast_ = predict(BNN_arch, X_test_forecast_, θ_MAP, ps_MAP, st_BNN)[:, 1]
-		y_actuals_forecast_ = TEST[TEST.Age .== forecast_age .&& TEST.PopID .== pop_id .&& TEST.log_mx .< 0.0, ["Year", "log_mx"]]
-		y_actuals_obs_forecast_ = TEST[TEST.Age .== forecast_age .&& TEST.PopID .== pop_id .&& TEST.log_mx .< 0.0 .&& TEST.Observed .== 1, ["Year", "log_mx"]]
+		y_actuals_forecast_ = TEST[TEST.Age .== ages .&& TEST.PopID .== pop_id .&& TEST.log_mx .< 0.0, ["Year", "log_mx"]]
+		y_actuals_obs_forecast_ = TEST[TEST.Age .== ages .&& TEST.PopID .== pop_id .&& TEST.log_mx .< 0.0 .&& TEST.Observed .== 1, ["Year", "log_mx"]]
+		median_forecast2, lb_forecast2, ub_forecast2, _ = predict(BNN_arch, X_test_forecast_, chains, ps_BNN, st_BNN, 10_000)
 		
-		plot(title="Forecast for Age $forecast_age: $(country_name)\n Lee-Carter NN", xlab="Year", ylab="log μ", legend=:best)
-		
-		median_forecast2, lb_forecast2, ub_forecast2 = predict(BNN_arch, X_test_forecast_, chains, ps_BNN, st_BNN, 10_000)
-
-		plot!(max(start_year, TEST.Year[1]):extended_forecast_year, y_pred_forecast_, label="Forecast: AdamW", color=:blue, width=2)
-		plot!(max(start_year, TEST.Year[1]):extended_forecast_year, median_forecast2, label="Forecast: BNN Median", color=:red, width=2)
-		plot!(max(start_year, TEST.Year[1]):extended_forecast_year, MAP_forecast_, label="Forecast: BNN MAP", color=:red, width=2, linestyle=:dash)
-		plot!(max(start_year, TEST.Year[1]):extended_forecast_year, lb_forecast2, fillrange=ub_forecast2, label="Forecast: BNN 95% CI", color=:red, width=0.9, alpha=0.2)
-		scatter!(y_actuals_forecast_.Year, y_actuals_forecast_.log_mx, label="Actual: Complete", color=:orange)
-		scatter!(y_actuals_obs_forecast_.Year, y_actuals_obs_forecast_.log_mx,  label="Actual: Observed", color=:black)
+		plt_a = begin
+			plot(title="Age $ages: $(country_name)\n $(mdl_type)", xlab="Year", ylab="log μ", legend=:best, xlim=year_r, left_margin=5mm)
+			plot!(max(start_year, TEST.Year[1]):extended_forecast_year, y_pred_forecast_, label="Forecast: AdamW", color=:blue, width=2)
+			plot!(max(start_year, TEST.Year[1]):extended_forecast_year, median_forecast2, label="Forecast: BNN Median", color=:red, width=2)
+			plot!(max(start_year, TEST.Year[1]):extended_forecast_year, MAP_forecast_, label="Forecast: BNN MAP", color=:red, width=2, linestyle=:dash)
+			plot!(max(start_year, TEST.Year[1]):extended_forecast_year, lb_forecast2, fillrange=ub_forecast2, label="Forecast: BNN 95% CI", color=:red, width=0.9, alpha=0.2)
+			#scatter!(y_actuals_forecast_.Year, y_actuals_forecast_.log_mx, label="Actual: Complete", color=:orange)
+			scatter!(y_actuals_obs_forecast_.Year, y_actuals_obs_forecast_.log_mx,  label="Actual: Observed", color=:black)
+		end
+		push!(plt_a_set, plt_a)
 	end
+	
+	plot(plt_a_set..., layout = (3, 2), size = (1000, 1200), plot_title="")
 end
 
 # ╔═╡ 01f3db0b-ffe7-49e0-83e3-df989126a945
@@ -2145,9 +2164,18 @@ function predict__(m, xs, chains, p_, st_, N_sims, idx₁, idx₂)
 	st_test = Lux.testmode(st_)
 
 	function fwd_pass(par, idx₁, idx₂)
+		#@show size(Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1])
 		if idx₁ == 1 && idx₂ == 2
+			#region_loading = vec(Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][end-1][2, :])
 			return exp.(vec(Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][idx₁][idx₂, :]))
 		else
+			#=
+			if idx₁ == 1 && idx₂ == 1
+				region_loading = vec(Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][end-1][1, :])
+			elseif idx₁ == 2 && idx₂ == 1
+				region_loading = vec(Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][end-1][3, :])
+			end
+			=#
 			return vec(Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][idx₁][idx₂, :])
 		end
 	end
@@ -2158,40 +2186,107 @@ function predict__(m, xs, chains, p_, st_, N_sims, idx₁, idx₂)
 	return quantile.(eachcol(y_pred_f), 0.5) |> vec, quantile.(eachcol(y_pred_f), 0.025) |> vec, quantile.(eachcol(y_pred_f), 1-0.025) |> vec
 end
 
+# ╔═╡ 72d85ba7-c1e1-4b95-ba91-3278f86abd06
+function predict_HP(m, xs, chains, p_, st_, N_sims, i)
+	posterior_samples = sample(Xoshiro(1111), chains[10:end, :, :], N_sims)
+	#α_sample = Matrix(MCMCChains.group(posterior_samples, :α).value[:, :, 1])
+	θ_sample = Matrix(MCMCChains.group(posterior_samples, :parameters).value[:, :, 1])
+	#σ_sample = Matrix(MCMCChains.group(posterior_samples, :σ).value[:, :, 1])
+
+	_, st_ = Lux.setup(Xoshiro(12345), m) |> f64
+	
+	st_test = Lux.testmode(st_)
+	
+	function fwd_pass(par)
+		region_params = Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][4] ./ Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][4]
+							
+		infant_year_params = Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][1]
+		A = exp.(infant_year_params[1, :] .* region_params[1, :] .- 11.0f0)
+	    B = softplus.(infant_year_params[2, :] .* region_params[2, :])
+	    C = sigmoid.(infant_year_params[3, :] .* region_params[3, :]) .* 0.2f0
+		
+	    hump_year_params = Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][2]
+	    D = exp.(hump_year_params[1, :] .* region_params[4, :] .- 11.0f0)
+	    E = softplus.(hump_year_params[2, :] .* region_params[5, :])
+	    F = 18.0f0 .+ softplus.(hump_year_params[3, :] .* region_params[6, :])
+		
+	    secant_year_params = Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][3]
+	    G = exp.(secant_year_params[1, :] .* region_params[7, :] .- 11.0f0)
+	    H = 1.0f0 .+ softplus.(secant_year_params[2, :] .* region_params[8, :]) .* 0.15f0
+
+		region_params = Lux.apply(m, xs |> f64, vector_to_parameters(par, p_) |> f64, st_test)[1][4]
+
+		return A, B, C, D, E, F, G, H, region_params[1, :], region_params[2, :], region_params[3, :], region_params[4, :], region_params[5, :], region_params[6, :], region_params[7, :], region_params[8, :], region_params[9, :]
+	end
+
+	y_pred_f = hcat([fwd_pass(θ_sample[k, :])[i] for k ∈ 1:N_sims]...)'
+
+	return quantile.(eachcol(y_pred_f), 0.5) |> vec, quantile.(eachcol(y_pred_f), 0.025) |> vec, quantile.(eachcol(y_pred_f), 1-0.025) |> vec
+end
+
 # ╔═╡ 3a8da928-5284-4ab3-8782-7ae678e0a49c
 begin
 	BNN_arch_ = LeeCarterNN_gender(τ₁; show_intermediate=true)
-	X_test_forecast__ = Matrix(TEST[TEST.Age .== 65, ["Year_std", "Age_std"]])'
+	X_test_forecast__ = Matrix(TEST[TEST.Age .== 65, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
 	median_forecast2_, lb_forecast2_, ub_forecast2_ = predict__(BNN_arch_, X_test_forecast__, chains, ps_BNN, st_BNN, 1_000, 2, 1)
 
-	plot(xlab="Year", ylab="κ(t)", title="$(country)")
-	plot!(max(start_year, TEST.Year[1]):extended_forecast_year, median_forecast2_,  label="BNN Median", color=:red, width=2)
-	plot!(max(start_year, TEST.Year[1]):extended_forecast_year, lb_forecast2_, fillrange=ub_forecast2_, label="BNN 95% CI", color=:red, width=0.9, alpha=0.2, ylim=(minimum(median_forecast2_) - 0.001, 1.1*maximum(median_forecast2_)))
-end
+	plt_k = begin
+		plot(xlab="Year (t)", ylab="κ(t)", ylim=(-4.2, -3.8), xlim=(2000, 2016))
+		plot!(max(start_year, TEST.Year[1]):extended_forecast_year, median_forecast2_,  label="BNN Median", color=:red, width=2, xlim=(2000, extended_forecast_year))
+		#plot!(max(start_year, TEST.Year[1]):extended_forecast_year, lb_forecast2_, fillrange=ub_forecast2_, label="BNN 95% CI", color=:red, width=0.9, alpha=0.2, ylim=(minimum(median_forecast2_) - 0.001, 1.1*maximum(median_forecast2_)))
+	end
 
-# ╔═╡ d26c22aa-d417-4268-ae7c-15345a63ed3b
-BNN_arch_
+end
 
 # ╔═╡ bc381caa-73a3-4203-8742-0051e44a0464
 begin
-	X_test_forecast___ = Matrix(TEST[TEST.Year .== 2001, ["Year_std", "Age_std"]])'
+	X_test_forecast___ = Matrix(TEST[TEST.Year .== 1999, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
 
-	plt1 = begin
+	plt_a = begin
 		median_forecast2__, lb_forecast2__, ub_forecast2__ = predict__(BNN_arch_, X_test_forecast___, chains, ps_BNN, st_BNN, 1_000, 1, 1)
-		plot(xlab="Age", ylab="α(x)", title="$(country)")
-		plot!(start_age:end_age, median_forecast2__,  label="BNN Median", color=:red, width=2)
-		plot!(start_age:end_age, lb_forecast2__, fillrange=ub_forecast2__, label="BNN 95% CI", color=:red, width=0.9, alpha=0.2, ylim=(minimum(median_forecast2__) - 0.5, 1.1*maximum(median_forecast2__)))
+		plot(xlab="Age (x)", ylab="α(x)")
+		plot!(start_age:end_age, median_forecast2__, label="BNN Median", color=:red, width=2)
+		#plot!(start_age:end_age, lb_forecast2__, fillrange=ub_forecast2__, label="BNN 95% CI", color=:red, width=0.9, alpha=0.2, ylim=(minimum(median_forecast2__) - 0.5, 1.1*maximum(median_forecast2__)))
 	end
 
-	plt2 = begin
+	plt_b = begin
 		median_forecast2__, lb_forecast2__, ub_forecast2__ = predict__(BNN_arch_, X_test_forecast___, chains, ps_BNN, st_BNN, 1_000, 1, 2)
-		plot(xlab="Age", ylab="β(x)", title="$(country)")
-		plot!(start_age:end_age, median_forecast2__,  label="BNN Median", color=:red, width=2)
-		plot!(start_age:end_age, lb_forecast2__, fillrange=ub_forecast2__, label="BNN 95% CI", color=:red, width=0.9, alpha=0.2, ylim=(minimum(median_forecast2__) - 0.1, 1.1*maximum(median_forecast2__)))
+		plot(xlab="Age (x)", ylab="β(x)")
+		plot!(start_age:end_age, median_forecast2__, label="BNN Median", color=:red, width=2)
+		#plot!(start_age:end_age, lb_forecast2__, fillrange=ub_forecast2__, label="BNN 95% CI", color=:red, width=0.9, alpha=0.2, ylim=(minimum(median_forecast2__) - 0.1, 1.1*maximum(median_forecast2__)))
 	end
 
-	plot(plt1, plt2)
+	plot([plt_a, plt_b, plt_k, plt_log_var]..., size=(1000, 1000), plot_title="$(country_name)\n $(mdl_type)", leftmargin=6mm)
 end
+
+# ╔═╡ afe33469-307b-4eff-9d0e-a4f28730d108
+begin
+	BNN_arch_HP = HeligmanPollardNN_gender(τ₁; show_intermediate=true)
+	X_test_forecast__HP = Matrix(TEST[TEST.Age .== 65 .&& TEST.PopID .== 1, ["Year_std", "Age_std", "Birth_year_std", "PopID"]])'
+
+	param_names = ["A", "B", "C", "D", "E", "F", "G", "H", "σ²"]
+	plt_HPs = []
+	df_HPs = []
+
+	for i ∈ 1:17
+		median_forecast2_HP, lb_forecast2_HP, ub_forecast2_HP = predict_HP(BNN_arch_HP, X_test_forecast__HP, chains, ps_BNN, st_BNN, 1_000, i)
+
+		if i < 9
+			plt_HP = plot(1950:2065, median_forecast2_HP, width=2, color=:red, xlab="Year (t)", ylab="$(param_names[i])(t)", label="BNN Median")
+			push!(plt_HPs, plt_HP)
+		else
+			@info "$pop_id, $(param_names[i-8]), $(median_forecast2_HP[1])"
+		end
+	end
+
+	plot(plt_HPs..., size=(1000, 1000), plot_title="Multi-Pop. HPNN\nGlobal Components", leftmargin=6mm)
+end
+
+# ╔═╡ d25e0924-f6b5-4282-ad45-96c7ab54f048
+HeligmanPollardNN_gender(τ₁; show_intermediate=true)
+
+# ╔═╡ 7254262e-ce49-4e4f-8ccf-fb5bad885476
+plot([plt_k, plt_log_var]..., size=(1000, 550), plot_title="$(country_name)\n $(mdl_type)", leftmargin=6mm)
 
 # ╔═╡ ab54a223-999e-424a-89bf-c66c629bd21b
 heatmap((predict__(BNN_arch_, X_test_forecast___, chains, ps_BNN, st_BNN, 1_000, 1, 1)[1] .+ median_forecast2__ * exp.(median_forecast2_)')', xlab="Age", ylab="Time")
@@ -2397,16 +2492,24 @@ end
 # ╠═c8fa5746-8eec-45a1-bda5-871ef71de684
 # ╠═09f6c249-dbce-40bf-a879-39c85650a8cb
 # ╠═0b8f579c-36e9-4660-9793-c537bb5e275d
+# ╠═b95c378a-13a1-4393-9d6e-808827c76159
 # ╠═7c48fa09-5061-43e6-8483-961b3d2cee0c
+# ╠═c9824a8f-9fbf-4285-9ca7-48eb173f6e85
+# ╠═e1f8ec5d-e3a1-4c5e-bf8b-6089388ae7a4
+# ╠═b4aa212a-d59d-43da-ac8c-700022c12b16
+# ╠═6b98d2bc-de7d-463f-9728-29fa03539c26
 # ╠═c59ed9df-f944-4ee6-881e-2986dc8b1d3d
 # ╠═57f6b96c-98e4-4a68-942c-13d1036ce643
 # ╠═d826f3b4-8a5f-4f99-88fb-d9b8420c6d89
 # ╠═c1b667d2-1411-4637-9309-967309cc30e6
 # ╠═01f3db0b-ffe7-49e0-83e3-df989126a945
 # ╠═0ff0b225-01df-43c3-a755-481bda77c647
+# ╠═72d85ba7-c1e1-4b95-ba91-3278f86abd06
 # ╠═3a8da928-5284-4ab3-8782-7ae678e0a49c
-# ╠═d26c22aa-d417-4268-ae7c-15345a63ed3b
 # ╠═bc381caa-73a3-4203-8742-0051e44a0464
+# ╠═afe33469-307b-4eff-9d0e-a4f28730d108
+# ╠═d25e0924-f6b5-4282-ad45-96c7ab54f048
+# ╠═7254262e-ce49-4e4f-8ccf-fb5bad885476
 # ╠═ab54a223-999e-424a-89bf-c66c629bd21b
 # ╠═ea49af3a-d66d-4c0f-8660-9c5b4bbc6087
 # ╠═38dd4c3f-ca41-47dc-9ce0-ba4edfb69a51
